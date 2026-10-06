@@ -93,6 +93,53 @@ def update_analysis_cache():
             }
         },
         {
+            "$set": {
+                "project_key": {
+                    "$reduce": {
+                        "input": {
+                            "$filter": {
+                                "input": [
+                                    "$institution",
+                                    "$project_title",
+                                    {
+                                    "$cond": [
+                                        {
+                                        "$ne": [
+                                            "$project_number",
+                                            None
+                                        ]
+                                        },
+                                        {
+                                        "$toString":
+                                            "$project_number"
+                                        },
+                                        None
+                                    ]
+                                    }
+                                ],
+                                "as": "part",
+                                "cond": { "$ne": ["$$part", None] }
+                            }
+                        },
+                        "initialValue": "",
+                        "in": {
+                            "$cond": [
+                                { "$eq": ["$$value", ""] },
+                                "$$this",
+                                {
+                                    "$concat": [
+                                    "$$value",
+                                    "-",
+                                    "$$this"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {
             "$lookup": {
                 "from": MANUAL_METADATA_COL_NAME,
                 "localField": "isolate_id",
@@ -250,8 +297,6 @@ def get_analysis_page_bundle(
     sorting=None,
     workspace_items: Optional[List[str]] = None,
 ):
-
-
     ensure_cache_updated()
 
     conn, encryption_client = get_connection(with_enc=True)
@@ -297,12 +342,15 @@ def get_analysis_page_bundle(
     for field in distinct:
         distinct_group[field] = {"$addToSet": f"${field}"}
 
+
+    print("QUERY WITH DC:",data_clearance)
+
     base_pipeline = [
         {
             "$lookup": {
                 "from": PROJECT_PRIVACY_COL_NAME,
-                "localField": "project_number",
-                "foreignField": "project_number",
+                "localField": "project_key",
+                "foreignField": "project_key",
                 "as": "project_privacy",
             }
         }
@@ -312,6 +360,7 @@ def get_analysis_page_bundle(
             "$match": {
                 "$or": [
                     {"project_privacy": {"$eq": []}},
+                    {"project_privacy.is_private": False},
                     {"project_privacy.institution": institution},
                 ]
             }
@@ -410,7 +459,7 @@ def get_single_analysis(sequence_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     mydb = conn[DB_NAME]
     analysis = mydb[ANALYSIS_CACHE_COL_NAME]
-    return analysis.find_one({"sequence_id": sequence_id}, {"_id": 0})
+    return analysis.find_one({"sequence_id": sequence_id})
 
 def get_single_analysis_by_object_id(id: str) -> Optional[Dict[str, Any]]:
     ensure_cache_updated()
@@ -421,7 +470,6 @@ def get_single_analysis_by_object_id(id: str) -> Optional[Dict[str, Any]]:
     analysis_obj = analysis.find_one(ObjectId(id))
     if analysis_obj is None:
         return None
-
     return get_single_analysis(analysis_obj["sequence_id"])
 
     
